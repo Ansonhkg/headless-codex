@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+# The official package does not ship chrome-sandbox. Container runtimes also
+# commonly block Electron's unprivileged-user-namespace fallback, so isolation
+# is supplied by the non-root container boundary instead.
+exec dbus-run-session -- /usr/bin/chatgpt \
+  --no-sandbox \
+  --disable-gpu-sandbox \
+  --use-gl=swiftshader \
+  --start-maximized \
+  --window-size=1440,900 \
+  --window-position=0,0 \
+  "$@"

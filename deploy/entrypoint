@@ -1,0 +1,58 @@
+#!/bin/sh
+set -eu
+
+desktop_profile="${HEADLESS_CODEX_DATA_DIR:-/data}/desktop"
+codex_config="${CODEX_HOME:-${HEADLESS_CODEX_DATA_DIR:-/data}/codex-home}/config.toml"
+
+set_codex_config_string() {
+  config_key="$1"
+  config_value="$2"
+  config_tmp="${codex_config}.headless-codex.$$"
+
+  if grep -q "^${config_key} =" "$codex_config" 2>/dev/null; then
+    sed -i "s|^${config_key} =.*|${config_key} = \"${config_value}\"|" "$codex_config"
+    return
+  fi
+
+  {
+    printf '%s = "%s"\n' "$config_key" "$config_value"
+    if [ -f "$codex_config" ]; then
+      sed "/^${config_key} =/d" "$codex_config"
+    fi
+  } > "$config_tmp"
+  mv "$config_tmp" "$codex_config"
+}
+
+case "${HEADLESS_CODEX_MODEL:-gpt-5.6-luna}" in
+  *[!A-Za-z0-9._-]*) echo "Invalid HEADLESS_CODEX_MODEL" >&2; exit 64 ;;
+esac
+configured_reasoning="${HEADLESS_CODEX_REASONING:-xhigh}"
+case "$configured_reasoning" in
+  light) configured_reasoning="low" ;;
+  standard) configured_reasoning="medium" ;;
+  extra-high) configured_reasoning="xhigh" ;;
+  none|minimal|low|medium|high|xhigh|max|ultra) ;;
+  *) echo "Invalid HEADLESS_CODEX_REASONING" >&2; exit 64 ;;
+esac
+
+mkdir -p "$(dirname "$codex_config")"
+set_codex_config_string model "${HEADLESS_CODEX_MODEL:-gpt-5.6-luna}"
+set_codex_config_string model_reasoning_effort "$configured_reasoning"
+
+# Headless workers are an unattended execution environment. Force the active
+# Codex permission mode as well as the default composer profile so Desktop and
+# CLI turns cannot fall back to per-request approval prompts.
+set_codex_config_string approval_policy "never"
+set_codex_config_string sandbox_mode "danger-full-access"
+set_codex_config_string default_permissions ":danger-full-access"
+
+# Electron leaves hostname-scoped singleton links behind when a container is
+# replaced. They cannot be valid before this process starts and otherwise make
+# a persistent profile look as if it is still mounted by the old container.
+rm -f "$desktop_profile/SingletonLock" "$desktop_profile/SingletonSocket" "$desktop_profile/SingletonCookie"
+
+# A container snapshot or unclean shutdown can preserve Xvfb's display lock
+# even though no X server can survive into this process namespace.
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+
+exec /usr/local/bin/headless-codex "$@"
